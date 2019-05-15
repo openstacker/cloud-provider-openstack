@@ -59,7 +59,7 @@ endif
 depend-update: work
 	dep ensure -update -v
 
-build: openstack-cloud-controller-manager cinder-provisioner cinder-flex-volume-driver cinder-csi-plugin k8s-keystone-auth client-keystone-auth octavia-ingress-controller manila-provisioner barbican-kms-plugin
+build: openstack-cloud-controller-manager cinder-provisioner cinder-flex-volume-driver cinder-csi-plugin k8s-keystone-auth client-keystone-auth octavia-ingress-controller manila-provisioner barbican-kms-plugin k8s-auto-healer
 
 openstack-cloud-controller-manager: depend $(SOURCES)
 	CGO_ENABLED=0 GOOS=$(GOOS) go build \
@@ -114,6 +114,12 @@ barbican-kms-plugin: depend $(SOURCES)
 		-ldflags $(LDFLAGS) \
 		-o barbican-kms-plugin \
 		cmd/barbican-kms-plugin/main.go
+
+k8s-auto-healer: depend $(SOURCES)
+	cd $(DEST) && CGO_ENABLED=0 GOOS=$(GOOS) go build \
+		-ldflags $(LDFLAGS) \
+		-o k8s-auto-healer \
+		cmd/k8s-auto-healer/main.go
 
 test: unit functional
 
@@ -191,7 +197,7 @@ install-distro-packages:
 	tools/install-distro-packages.sh
 
 clean:
-	rm -rf _dist .bindep openstack-cloud-controller-manager cinder-flex-volume-driver cinder-provisioner cinder-csi-plugin k8s-keystone-auth client-keystone-auth octavia-ingress-controller manila-provisioner
+	rm -rf _dist .bindep openstack-cloud-controller-manager cinder-flex-volume-driver cinder-provisioner cinder-csi-plugin k8s-keystone-auth client-keystone-auth octavia-ingress-controller manila-provisioner k8s-auto-healer
 
 realclean: clean
 	rm -rf vendor
@@ -202,7 +208,7 @@ realclean: clean
 shell:
 	$(SHELL) -i
 
-images: image-controller-manager image-flex-volume-driver image-provisioner image-csi-plugin image-k8s-keystone-auth image-octavia-ingress-controller image-manila-provisioner image-kms-plugin
+images: image-controller-manager image-flex-volume-driver image-provisioner image-csi-plugin image-k8s-keystone-auth image-octavia-ingress-controller image-manila-provisioner image-kms-plugin image-k8s-auto-healer
 
 image-controller-manager: depend openstack-cloud-controller-manager
 ifeq ($(GOOS),linux)
@@ -276,6 +282,15 @@ else
 	$(error Please set GOOS=linux for building the image)
 endif
 
+image-k8s-auto-healer: depend k8s-auto-healer
+ifeq ($(GOOS),linux)
+	cp k8s-auto-healer cluster/images/k8s-auto-healer
+	docker build -t $(REGISTRY)/k8s-auto-healer:$(VERSION) cluster/images/k8s-auto-healer
+	rm cluster/images/k8s-auto-healer/k8s-auto-healer
+else
+	$(error Please set GOOS=linux for building the image)
+endif
+
 upload-images: images
 	@echo "push images to $(REGISTRY)"
 	docker login -u="$(DOCKER_USERNAME)" -p="$(DOCKER_PASSWORD)";
@@ -286,6 +301,7 @@ upload-images: images
 	docker push $(REGISTRY)/k8s-keystone-auth:$(VERSION)
 	docker push $(REGISTRY)/octavia-ingress-controller:$(VERSION)
 	docker push $(REGISTRY)/manila-provisioner:$(VERSION)
+	docker push $(REGISTRY)/k8s-auto-healer:$(VERSION)
 
 version:
 	@echo ${VERSION}
@@ -304,6 +320,7 @@ endif
 	CGO_ENABLED=0 gox -parallel=$(GOX_PARALLEL) -output="_dist/{{.OS}}-{{.Arch}}/{{.Dir}}" -osarch='$(TARGETS)' $(GOFLAGS) $(if $(TAGS),-tags '$(TAGS)',) -ldflags '$(LDFLAGS)' $(GIT_HOST)/$(BASE_DIR)/cmd/client-keystone-auth/
 	CGO_ENABLED=0 gox -parallel=$(GOX_PARALLEL) -output="_dist/{{.OS}}-{{.Arch}}/{{.Dir}}" -osarch='$(TARGETS)' $(GOFLAGS) $(if $(TAGS),-tags '$(TAGS)',) -ldflags '$(LDFLAGS)' $(GIT_HOST)/$(BASE_DIR)/cmd/octavia-ingress-controller/
 	CGO_ENABLED=0 gox -parallel=$(GOX_PARALLEL) -output="_dist/{{.OS}}-{{.Arch}}/{{.Dir}}" -osarch='$(TARGETS)' $(GOFLAGS) $(if $(TAGS),-tags '$(TAGS)',) -ldflags '$(LDFLAGS)' $(GIT_HOST)/$(BASE_DIR)/cmd/manila-provisioner/
+	CGO_ENABLED=0 gox -parallel=$(GOX_PARALLEL) -output="_dist/{{.OS}}-{{.Arch}}/{{.Dir}}" -osarch='$(TARGETS)' $(GOFLAGS) $(if $(TAGS),-tags '$(TAGS)',) -ldflags '$(LDFLAGS)' $(GIT_HOST)/$(BASE_DIR)/cmd/k8s-auto-healer/
 
 .PHONY: dist
 dist: build-cross
