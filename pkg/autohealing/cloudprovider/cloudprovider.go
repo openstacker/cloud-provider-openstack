@@ -18,9 +18,9 @@ package cloudprovider
 
 import (
 	log "github.com/sirupsen/logrus"
-	apiv1 "k8s.io/api/core/v1"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
+	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
 )
 
 var (
@@ -33,7 +33,7 @@ type CloudProvider interface {
 	GetName() string
 
 	// Repair triggers the node repair process in the cloud.
-	Repair([]apiv1.Node) error
+	Repair([]healthcheck.NodeInfo) error
 
 	// Enabled decides if the repair should be triggered.
 	// It's recommended that the `Enabled()` function of the cloud provider doesn't allow to re-trigger when the repair

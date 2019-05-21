@@ -38,20 +38,30 @@ type Config struct {
 	// (Optional) If master nodes monitoring is enabled. Default: true
 	MasterMonitorEnabled bool `mapstructure:"master-monitor-enabled"`
 
-	// (Optional) How long to wait before a unhealthy master node should be repaired. Default: 300s
-	MasterUnhealthyDuration int `mapstructure:"master-unhealthy-duration"`
-
 	// (Optional) If worker nodes monitoring is enabled. Default: true
 	WorkerMonitorEnabled bool `mapstructure:"worker-monitor-enabled"`
-
-	// (Optional) How long to wait before a unhealthy worker node should be repaired. Default: 300s
-	WorkerUnhealthyDuration int `mapstructure:"worker-unhealthy-duration"`
 
 	// (Optional) Kubernetes related configuration.
 	Kubernetes kubeConfig `mapstructure:"kubernetes"`
 
 	// (Required) OpenStack related configuration.
 	OpenStack osConfig `mapstructure:"openstack"`
+
+	// (Optional) Healthcheck configuration for master and worker.
+	HealthCheck healthCheck `mapstructure:"healthcheck"`
+}
+
+type healthCheck struct {
+	Master []Check `mapstructure:"master"`
+	Worker []Check `mapstructure:"worker"`
+}
+
+type Check struct {
+	// (Required) Health check plugin type.
+	Type string `mapstructure:"type"`
+
+	// (Required) Customized health check parameters defined by individual health check plugin.
+	Params map[string]interface{} `mapstructure:"params"`
 }
 
 // Configuration for connecting to Kubernetes API server, either api_host or kubeconfig should be configured.
@@ -106,12 +116,10 @@ func (cfg Config) ToV3AuthOptions() tokens.AuthOptions {
 // NewConfig defines the default values for Config
 func NewConfig() Config {
 	return Config{
-		DryRun:                  false,
-		CloudProvider:           "openstack",
-		MonitorInterval:         30,
-		MasterMonitorEnabled:    true,
-		MasterUnhealthyDuration: 300,
-		WorkerMonitorEnabled:    true,
-		WorkerUnhealthyDuration: 300,
+		DryRun:               false,
+		CloudProvider:        "openstack",
+		MonitorInterval:      30,
+		MasterMonitorEnabled: true,
+		WorkerMonitorEnabled: true,
 	}
 }

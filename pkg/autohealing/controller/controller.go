@@ -35,6 +35,7 @@ import (
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/cloudprovider"
 	_ "k8s.io/cloud-provider-openstack/pkg/autohealing/cloudprovider/register"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
+	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
 )
 
 // EventType type of event associated with an informer
@@ -64,11 +65,6 @@ const (
 type Event struct {
 	Type EventType
 	Obj  interface{}
-}
-
-type NodeInfo struct {
-	kubeNode           apiv1.Node
-	lastTransitionTime time.Time
 }
 
 // Controller ...
@@ -152,33 +148,50 @@ func (c *Controller) startMasterMonitor(wg *sync.WaitGroup) {
 	log.Debug("Finished checking master nodes.")
 }
 
-func (c *Controller) getUnhealthyWorkerNodes() ([]NodeInfo, error) {
-	var nodes []NodeInfo
+// getUnhealthyWorkerNodes returns the nodes that need to be repaired.
+func (c *Controller) getUnhealthyWorkerNodes() ([]healthcheck.NodeInfo, error) {
+	var nodes []healthcheck.NodeInfo
+	var checkers []healthcheck.HealthCheck
 
+	// Get all the valid checkers.
+	for _, item := range c.config.HealthCheck.Worker {
+		checker, err := healthcheck.GetHealthChecker(item.Type, item.Params)
+		if err != nil {
+			log.Errorf("failed to get %s type health check, error: %v", item.Type, err)
+			continue
+		}
+		if !checker.IsWorkerSupported() {
+			log.Warnf("Plugin type %s does not support worker node health check.", item.Type)
+			continue
+		}
+
+		checkers = append(checkers, checker)
+	}
+
+	// If no checkers defined, skip.
+	if len(checkers) == 0 {
+		return nil, nil
+	}
+
+	// Get all the worker nodes.
 	nodeList, err := c.kubeClient.CoreV1().Nodes().List(metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-
 	for _, node := range nodeList.Items {
-		// Ignore master nodes
 		if _, hasMasterRoleLabel := node.Labels[LabelNodeRoleMaster]; hasMasterRoleLabel {
 			continue
 		}
-
-		// If we have no info, don't accept
 		if len(node.Status.Conditions) == 0 {
 			continue
 		}
-
-		for _, cond := range node.Status.Conditions {
-			if cond.Type == apiv1.NodeReady && cond.Status != apiv1.ConditionTrue {
-				nodes = append(nodes, NodeInfo{kubeNode: node, lastTransitionTime: cond.LastTransitionTime.Time})
-			}
-		}
+		nodes = append(nodes, healthcheck.NodeInfo{KubeNode: node})
 	}
 
-	return nodes, nil
+	// Do health check.
+	failedNodes := healthcheck.CheckNodes(checkers, nodes)
+
+	return failedNodes, nil
 }
 
 func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
@@ -188,32 +201,36 @@ func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
 	// Get all the unhealthy worker nodes.
 	unhealthyNodes, err := c.getUnhealthyWorkerNodes()
 	if err != nil {
-		log.WithFields(log.Fields{"error": err}).Warn("Failed to get unhealthy worker nodes.")
+		log.WithFields(log.Fields{"error": err}).Error("Failed to get unhealthy worker nodes.")
 		return
 	}
 
-	namesNeedRepair := sets.NewString()
-	var nodesNeedRepair []apiv1.Node
-
-	for _, node := range unhealthyNodes {
-		unhealthyDuration := time.Now().Sub(node.lastTransitionTime)
-
-		if int(unhealthyDuration.Seconds()) >= c.config.WorkerUnhealthyDuration {
-			nodesNeedRepair = append(nodesNeedRepair, node.kubeNode)
-			namesNeedRepair.Insert(node.kubeNode.Name)
-		}
+	unhealthyNodeNames := sets.NewString()
+	for _, n := range unhealthyNodes {
+		unhealthyNodeNames.Insert(n.KubeNode.Name)
 	}
 
 	// Trigger unhealthy nodes repair.
-	if len(nodesNeedRepair) > 0 {
+	if len(unhealthyNodes) > 0 {
 		if !c.provider.Enabled() {
 			// The cloud provider doesn't allow to trigger node repair.
-			log.WithFields(log.Fields{"nodes": namesNeedRepair}).Info("Auto healing is ignored.")
+			log.WithFields(log.Fields{"nodes": unhealthyNodeNames.List()}).Info("Auto healing is ignored.")
 		} else {
-			log.WithFields(log.Fields{"nodes": namesNeedRepair}).Info("Starting to repair worker nodes.")
+			log.WithFields(log.Fields{"nodes": unhealthyNodeNames.List()}).Info("Starting to repair worker nodes.")
 
 			if !c.config.DryRun {
-				c.provider.Repair(nodesNeedRepair)
+				// Cordon the nodes before repair.
+				for _, node := range unhealthyNodes {
+					newNode := node.KubeNode.DeepCopy()
+					newNode.Spec.Unschedulable = true
+					if _, err = c.kubeClient.CoreV1().Nodes().Update(newNode); err != nil {
+						log.WithFields(log.Fields{"error": err}).Errorf("Failed to cordon worker node %s", node.KubeNode.Name)
+					} else {
+						log.Infof("Worker node %s is cordoned", node.KubeNode.Name)
+					}
+				}
+
+				c.provider.Repair(unhealthyNodes)
 			}
 		}
 	}

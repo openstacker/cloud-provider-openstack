@@ -18,9 +18,9 @@ package openstack
 
 import (
 	"github.com/gophercloud/gophercloud"
-	apiv1 "k8s.io/api/core/v1"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
+	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
 )
 
 const (
@@ -43,7 +43,7 @@ func (provider OpenStackCloudProvider) GetName() string {
 // the VMs. The information this function needs:
 // - Nova VM IDs
 // - Heat stack ID and resource ID.
-func (provider OpenStackCloudProvider) Repair([]apiv1.Node) error {
+func (provider OpenStackCloudProvider) Repair([]healthcheck.NodeInfo) error {
 	// Get Heat stack ID related to the Magnum cluster.
 
 	return nil
