@@ -231,7 +231,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:c6ae6215aaacaa06d48c8cd231a6c28396b8f3a1efea1ebb0b3563062e4ef26a"
+  digest = "1:8a5e9ae8b975657a3aa1bc913bbe43a317667e4eff3126ce316053e41a13dc9a"
   name = "github.com/gophercloud/gophercloud"
   packages = [
     ".",
@@ -245,10 +245,12 @@
     "openstack/common/extensions",
     "openstack/compute/v2/extensions/attachinterfaces",
     "openstack/compute/v2/extensions/availabilityzones",
+    "openstack/compute/v2/extensions/startstop",
     "openstack/compute/v2/extensions/volumeattach",
     "openstack/compute/v2/flavors",
     "openstack/compute/v2/images",
     "openstack/compute/v2/servers",
+    "openstack/containerinfra/v1/clusters",
     "openstack/identity/v2/tenants",
     "openstack/identity/v2/tokens",
     "openstack/identity/v3/extensions/trusts",
@@ -269,6 +271,8 @@
     "openstack/networking/v2/networks",
     "openstack/networking/v2/ports",
     "openstack/networking/v2/subnets",
+    "openstack/orchestration/v1/stackresources",
+    "openstack/orchestration/v1/stacks",
     "openstack/sharedfilesystems/apiversions",
     "openstack/sharedfilesystems/v2/shares",
     "openstack/utils",
@@ -277,7 +281,7 @@
     "testhelper/client",
   ]
   pruneopts = "UT"
-  revision = "2c55d17f707cc8333ca4f49690cb2970d12a25f6"
+  revision = "e87e5f90e7e67a309e0fe96dac144b824447607f"
 
 [[projects]]
   branch = "master"
@@ -591,6 +595,14 @@
   ]
   pruneopts = "UT"
   revision = "d0f344d83b0c80a1bc03b547a2374a9ec6711144"
+
+[[projects]]
+  digest = "1:274f67cb6fed9588ea2521ecdac05a6d62a8c51c074c1fccc6a49a40ba80e925"
+  name = "github.com/satori/go.uuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "f58768cc1a7a7e77a3bd49e98cdd21419399b6a3"
+  version = "v1.2.0"
 
 [[projects]]
   digest = "1:e4c72127d910a96daf869a44f3dd563b86dbe6931a172863a0e99c5ff04b59e4"
@@ -1546,8 +1558,10 @@
     "github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes",
     "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/attachinterfaces",
     "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/availabilityzones",
+    "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop",
     "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/volumeattach",
     "github.com/gophercloud/gophercloud/openstack/compute/v2/servers",
+    "github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters",
     "github.com/gophercloud/gophercloud/openstack/identity/v3/extensions/trusts",
     "github.com/gophercloud/gophercloud/openstack/identity/v3/tokens",
     "github.com/gophercloud/gophercloud/openstack/keymanager/v1/secrets",
@@ -1566,6 +1580,8 @@
     "github.com/gophercloud/gophercloud/openstack/networking/v2/networks",
     "github.com/gophercloud/gophercloud/openstack/networking/v2/ports",
     "github.com/gophercloud/gophercloud/openstack/networking/v2/subnets",
+    "github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources",
+    "github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks",
     "github.com/gophercloud/gophercloud/openstack/sharedfilesystems/apiversions",
     "github.com/gophercloud/gophercloud/openstack/sharedfilesystems/v2/shares",
     "github.com/gophercloud/gophercloud/openstack/utils",
@@ -1581,6 +1597,7 @@
     "github.com/onsi/gomega",
     "github.com/pborman/uuid",
     "github.com/prometheus/client_golang/prometheus",
+    "github.com/satori/go.uuid",
     "github.com/sirupsen/logrus",
     "github.com/spf13/cobra",
     "github.com/spf13/pflag",
