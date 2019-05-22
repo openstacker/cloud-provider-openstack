@@ -17,7 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -25,10 +27,13 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
 
@@ -69,38 +74,43 @@ type Event struct {
 
 // Controller ...
 type Controller struct {
-	provider   cloudprovider.CloudProvider
-	recorder   record.EventRecorder
-	kubeClient kubernetes.Interface
-	config     config.Config
+	provider             cloudprovider.CloudProvider
+	recorder             record.EventRecorder
+	kubeClient           kubernetes.Interface
+	leaderElectionClient kubernetes.Interface
+	config               config.Config
 }
 
-func createApiserverClient(apiserverHost string, kubeConfig string) (*kubernetes.Clientset, error) {
+func createKubeClients(apiserverHost string, kubeConfig string) (*kubernetes.Clientset, *kubernetes.Clientset, error) {
 	cfg, err := clientcmd.BuildConfigFromFlags(apiserverHost, kubeConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	cfg.QPS = defaultQPS
 	cfg.Burst = defaultBurst
 	cfg.ContentType = "application/vnd.kubernetes.protobuf"
 
-	log.Debug("creating kubernetes API client")
+	log.Debug("creating kubernetes API clients")
 
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	leaderElectionClient, err := kubernetes.NewForConfig(restclient.AddUserAgent(cfg, "leader-election"))
+	if err != nil {
+		return nil, nil, err
 	}
 
 	v, err := client.Discovery().ServerVersion()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.WithFields(log.Fields{
 		"version": fmt.Sprintf("v%v.%v", v.Major, v.Minor),
 	}).Debug("kubernetes API client created")
 
-	return client, nil
+	return client, leaderElectionClient, nil
 }
 
 // NewController creates a new autohealer controller.
@@ -113,8 +123,8 @@ func NewController(conf config.Config) *Controller {
 
 	log.Infof("Using cloud provider: %s", provider.GetName())
 
-	// initialize k8s client
-	kubeClient, err := createApiserverClient(conf.Kubernetes.ApiserverHost, conf.Kubernetes.KubeConfig)
+	// initialize k8s clients
+	kubeClient, leaderElectionClient, err := createKubeClients(conf.Kubernetes.ApiserverHost, conf.Kubernetes.KubeConfig)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"api_server":  conf.Kubernetes.ApiserverHost,
@@ -132,13 +142,40 @@ func NewController(conf config.Config) *Controller {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, apiv1.EventSource{Component: "openstack-ingress-controller"})
 
 	controller := &Controller{
-		config:     conf,
-		recorder:   recorder,
-		provider:   provider,
-		kubeClient: kubeClient,
+		config:               conf,
+		recorder:             recorder,
+		provider:             provider,
+		kubeClient:           kubeClient,
+		leaderElectionClient: leaderElectionClient,
 	}
 
 	return controller
+}
+
+func (c *Controller) GetLeaderElectionLock() (resourcelock.Interface, error) {
+	// Identity used to distinguish between multiple cloud controller manager instances
+	id, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	// add a uniquifier so that two processes on the same host don't accidentally both become active
+	id = id + "_" + string(uuid.NewUUID())
+
+	rl, err := resourcelock.New(
+		"endpoints",
+		"kube-system",
+		"k8s-auto-healer",
+		c.leaderElectionClient.CoreV1(),
+		c.leaderElectionClient.CoordinationV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      id,
+			EventRecorder: c.recorder,
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return rl, nil
 }
 
 func (c *Controller) startMasterMonitor(wg *sync.WaitGroup) {
@@ -239,14 +276,13 @@ func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
 }
 
 // Start starts the autohealing controller.
-func (c *Controller) Start() {
+func (c *Controller) Start(ctx context.Context) {
 	log.Info("Starting autohealing controller")
 
 	ticker := time.NewTicker(time.Duration(c.config.MonitorInterval) * time.Second)
 	defer ticker.Stop()
 
 	var wg sync.WaitGroup
-
 	for {
 		select {
 		case <-ticker.C:

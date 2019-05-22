@@ -17,6 +17,7 @@ limitations under the License.
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -26,6 +27,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"k8s.io/client-go/tools/leaderelection"
+
+	"time"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/controller"
@@ -47,7 +51,31 @@ var rootCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 		autohealer := controller.NewController(conf)
-		autohealer.Start()
+
+		if !conf.LeaderElect {
+			autohealer.Start(context.TODO())
+			panic("unreachable")
+		}
+
+		lock, err := autohealer.GetLeaderElectionLock()
+		if err != nil {
+			log.Fatalf("failed to get resource lock for leader election, error: %v", err)
+		}
+
+		// Try and become the leader and start cloud controller manager loops
+		leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
+			Lock:          lock,
+			LeaseDuration: 15 * time.Second,
+			RenewDeadline: 10 * time.Second,
+			RetryPeriod:   3 * time.Second,
+			Callbacks: leaderelection.LeaderCallbacks{
+				OnStartedLeading: autohealer.Start,
+				OnStoppedLeading: func() {
+					log.Fatal("leaderelection lost")
+				},
+			},
+			Name: "k8s-auto-healer",
+		})
 
 		sigCh := make(chan os.Signal)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

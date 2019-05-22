@@ -49,6 +49,9 @@ type Config struct {
 
 	// (Optional) Healthcheck configuration for master and worker.
 	HealthCheck healthCheck `mapstructure:"healthcheck"`
+
+	// (Optional) Start a leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability. Default: true
+	LeaderElect bool `mapstructure:"leader-elect"`
 }
 
 type healthCheck struct {
@@ -121,5 +124,6 @@ func NewConfig() Config {
 		MonitorInterval:      30,
 		MasterMonitorEnabled: true,
 		WorkerMonitorEnabled: true,
+		LeaderElect:          true,
 	}
 }
