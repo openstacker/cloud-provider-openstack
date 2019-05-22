@@ -30,23 +30,33 @@ const (
 )
 
 type NodeConditionCheck struct {
-	// (Optional) The condition type(case sensitive) specified in Node.spec.status.conditions items. Default: "Ready".
-	Type string `mapstructure:"type"`
+	// (Optional) The condition types(case sensitive) specified in Node.spec.status.conditions items. Default: ["Ready"].
+	Types []string `mapstructure:"types"`
 
 	// (Optional) How long to wait before a unhealthy worker node should be repaired. Default: 300s
-	UnhealthyDuration int `mapstructure:"unhealthyDuration"`
+	UnhealthyDuration time.Duration `mapstructure:"unhealthyDuration"`
 
-	// (Optional) The accepted healthy values(case sensitive) for the type. Default: ["True"]
+	// (Optional) The accepted healthy values(case sensitive) for the type. Default: ["True"]. OKValues could not be used together with ErrorValues.
 	OKValues []string `mapstructure:"okValues"`
+
+	// (Optional) The unhealthy values(case sensitive) for the type. Default: []. ErrorValues could not be used together with OKValues.
+	ErrorValues []string `mapstructure:"errorValues"`
 }
 
 // Check returns true if the node is healthy, otherwide false.
-func (check *NodeConditionCheck) Check(node NodeInfo) (bool) {
+func (check *NodeConditionCheck) Check(node NodeInfo) bool {
 	for _, cond := range node.KubeNode.Status.Conditions {
-		if string(cond.Type) == check.Type && !utils.Contains(check.OKValues, string(cond.Status)) {
+		if utils.Contains(check.Types, string(cond.Type)) {
 			unhealthyDuration := time.Now().Sub(cond.LastTransitionTime.Time)
-			if int(unhealthyDuration.Seconds()) >= check.UnhealthyDuration {
-				return false
+
+			if len(check.ErrorValues) > 0 {
+				if utils.Contains(check.ErrorValues, string(cond.Status)) && unhealthyDuration >= check.UnhealthyDuration {
+					return false
+				}
+			} else if len(check.OKValues) > 0 {
+				if !utils.Contains(check.OKValues, string(cond.Status)) && unhealthyDuration >= check.UnhealthyDuration {
+					return false
+				}
 			}
 		}
 	}
@@ -54,22 +64,32 @@ func (check *NodeConditionCheck) Check(node NodeInfo) (bool) {
 	return true
 }
 
+// IsMasterSupported checks if the health check plugin supports master node.
 func (check *NodeConditionCheck) IsMasterSupported() bool {
 	return true
 }
 
+// IsWorkerSupported checks if the health check plugin supports worker node.
 func (check *NodeConditionCheck) IsWorkerSupported() bool {
 	return true
 }
 
 func newNodeConditionCheck(config interface{}) (HealthCheck, error) {
 	check := NodeConditionCheck{
-		UnhealthyDuration: 300,
-		Type:              "Ready",
+		UnhealthyDuration: 300 * time.Second,
+		Types:             []string{"Ready"},
 		OKValues:          []string{"True"},
 	}
 
-	err := mapstructure.Decode(config, &check)
+	decConfig := mapstructure.DecoderConfig{
+		DecodeHook: stringToDurationHook,
+		Result:     &check,
+	}
+	decoder, err := mapstructure.NewDecoder(&decConfig)
+	if err != nil {
+		return nil, err
+	}
+	err = decoder.Decode(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get configuration for health check plugin %s, error: %v", NodeConditionType, err)
 	}

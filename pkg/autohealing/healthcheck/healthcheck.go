@@ -17,6 +17,7 @@ limitations under the License.
 package healthcheck
 
 import (
+	"reflect"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -37,7 +38,11 @@ type NodeInfo struct {
 type HealthCheck interface {
 	// Check returns true if the node is healthy, otherwide false. The plugin should deal with any error happened.
 	Check(node NodeInfo) bool
+
+	// IsMasterSupported checks if the health check plugin supports master node.
 	IsMasterSupported() bool
+
+	// IsWorkerSupported checks if the health check plugin supports worker node.
 	IsWorkerSupported() bool
 }
 
@@ -73,4 +78,11 @@ func CheckNodes(checkers []HealthCheck, nodes []NodeInfo) []NodeInfo {
 	}
 
 	return failedNodes
+}
+
+func stringToDurationHook(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+	if t == reflect.TypeOf(time.Second) && f == reflect.TypeOf("") {
+		return time.ParseDuration(data.(string))
+	}
+	return data, nil
 }
