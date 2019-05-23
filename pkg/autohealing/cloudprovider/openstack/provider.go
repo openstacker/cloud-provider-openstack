@@ -18,7 +18,6 @@ package openstack
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -28,11 +27,11 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/containerinfra/v1/clusters"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
-	uuid "github.com/satori/go.uuid"
+	uuid "github.com/pborman/uuid"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
-	"k8s.io/klog"
 )
 
 const (
@@ -74,9 +73,9 @@ func (provider OpenStackCloudProvider) GetName() string {
 func (provider *OpenStackCloudProvider) getStackName(stackID string) (string, error) {
 	stack, err := stacks.Find(provider.Heat, stackID).Extract()
 	if err != nil {
-		return "", fmt.Errorf("Could not find stack with ID %s: %v", stackID, err)
+		return "", fmt.Errorf("could not find stack with ID %s: %v", stackID, err)
 	}
-	klog.V(0).Infof("For stack ID %s, stack name is %s", stackID, stack.Name)
+	log.Debugf("for stack ID %s, stack name is %s", stackID, stack.Name)
 	return stack.Name, nil
 }
 
@@ -89,37 +88,31 @@ func (provider *OpenStackCloudProvider) getAllStackResourceMapping(stackName, st
 		return provider.ResourceStackMapping, nil
 	}
 	mapping := make(map[string]ResourceStackRelationship)
-	stackPages, err := stacks.List(provider.Heat, stacks.ListOpts{ShowNested: true}).AllPages()
-	if err != nil {
-		return m, fmt.Errorf("Could not list stacks: %v", err)
-	}
-	allStacks, err := stacks.ExtractStacks(stackPages)
-
 	serverPages, err := stackresources.List(provider.Heat, stackName, stackID, stackresources.ListOpts{Depth: 2}).AllPages()
 	if err != nil {
-		return m, fmt.Errorf("Could not list servers pages of given stack resource: %v", err)
+		return m, fmt.Errorf("could not list servers pages of given stack resource: %v", err)
 	}
 	serverResources, err := stackresources.ExtractResources(serverPages)
 	if err != nil {
-		return m, fmt.Errorf("Could not list servers resource: %v", err)
+		return m, fmt.Errorf("could not list servers resource: %v", err)
 	}
 	for _, sr := range serverResources {
 		if sr.Type != "OS::Nova::Server" {
 			continue
 		}
-		for _, sp := range allStacks {
-			matched, err := regexp.MatchString(stackName+`-(kube_masters|kube_minions)-\S+-\d+-\S+$`, sp.Name)
-			if err != nil {
-				klog.Warningln("Failed to find matched stack for %s", sp.Name)
+		for _, link := range sr.Links {
+			if link.Rel == "self" {
+				continue
 			}
-			if matched && strings.Contains(sr.Links[0].Href, sp.Name) {
+			paths := strings.Split(link.Href, "/")
+			if len(paths) > 2 {
 				m := ResourceStackRelationship{
 					ResourceID:   sr.PhysicalID,
 					ResourceName: sr.Name,
-					StackID:      sp.ID,
-					StackName:    sp.Name,
+					StackID:      paths[len(paths)-1],
+					StackName:    paths[len(paths)-2],
 				}
-				klog.V(8).Infof("Resource ID: %s, Resource name: %s, Parent ID: %s, Parent name: %s", sr.PhysicalID, sr.Name, sp.ID, sp.Name)
+				log.Infof("resource ID: %s, resource name: %s, parent stack ID: %s, parent stack name: %s", sr.PhysicalID, sr.Name, paths[len(paths)-1], paths[len(paths)-2])
 				mapping[sr.PhysicalID] = m
 			}
 		}
@@ -133,36 +126,45 @@ func (provider *OpenStackCloudProvider) getAllStackResourceMapping(stackName, st
 // - Nova VM IDs
 // - Heat stack ID and resource ID.
 func (provider OpenStackCloudProvider) Repair(nodes []healthcheck.NodeInfo) error {
-	// Get Heat stack ID related to the Magnum cluster.
 	cluster, err := clusters.Get(provider.Magnum, provider.Config.ClusterName).Extract()
+	if err != nil {
+		return fmt.Errorf("failed to get the cluster %s", provider.Config.ClusterName)
+	}
 	clusterStackName, err := provider.getStackName(cluster.StackID)
+	if err != nil {
+		return fmt.Errorf("failed to get the Heat stack from cluster %s", provider.Config.ClusterName)
+	}
 	allMapping, err := provider.getAllStackResourceMapping(clusterStackName, cluster.StackID)
+	if err != nil {
+		return fmt.Errorf("failed to get the resource stack mapping for cluster %s", provider.Config.ClusterName)
+	}
 
 	for _, n := range nodes {
-		id, err := uuid.FromString(n.KubeNode.Status.NodeInfo.MachineID)
-		if err != nil {
-			klog.Warningln("Failed to get the correct server ID for server %s.", n.KubeNode.Name)
+		id := uuid.Parse(n.KubeNode.Status.NodeInfo.MachineID)
+		if id == nil {
+			log.Warningf("failed to get the correct server ID for server %s", n.KubeNode.Name)
 			continue
 		}
 		serverID := id.String()
 		err = startstop.Stop(provider.Nova, serverID).ExtractErr()
 		if err != nil {
-			klog.Warningln("Failed to shutdown server server %s.", serverID)
+			log.Warningf("failed to shutdown server server %s", serverID)
 		}
-		klog.V(0).Infof("Marking unhealthy on node %s", serverID)
+		log.Infof("marking unhealthy on node %s", serverID)
 		opts := stackresources.MarkUnhealthyOpts{
 			MarkUnhealthy:        true,
 			ResourceStatusReason: "Mark resource unhealthy by autohealing controller",
 		}
 		err = stackresources.MarkUnhealthy(provider.Heat, allMapping[serverID].StackName, allMapping[serverID].StackID, allMapping[serverID].ResourceID, opts).ExtractErr()
 		if err != nil {
-			klog.Errorf("Failed to mark resource %s unhealthy", serverID)
+			log.Errorf("failed to mark resource %s unhealthy", serverID)
 		}
 	}
-
-	err = stacks.Update(provider.Heat, clusterStackName, cluster.StackID, nil).ExtractErr()
+	log.Debugf("start to do Heat stack update to rebuild resources.")
+	err = stacks.UpdatePatch(provider.Heat, clusterStackName, cluster.StackID, stacks.UpdateOpts{}).ExtractErr()
 	if err != nil {
-		return fmt.Errorf("Could not update stack to rebuild resources: %v", err)
+		log.Errorf(err.Error())
+		return fmt.Errorf("could not update stack to rebuild resources: %v", err)
 	}
 	return nil
 }
@@ -173,23 +175,27 @@ func (provider OpenStackCloudProvider) Repair(nodes []healthcheck.NodeInfo) erro
 // - The Magnum cluster is not in stable status.
 func (provider OpenStackCloudProvider) Enabled() bool {
 	cluster, err := clusters.Get(provider.Magnum, provider.Config.ClusterName).Extract()
+	if err != nil {
+		log.Warningf("failed to get the cluster %s.", provider.Config.ClusterName)
+		return false
+	}
 	autoHealingEnabled, err := strconv.ParseBool(cluster.Labels["auto_healing_enabled"])
 	if err != nil {
-		klog.Warningln("Failed to get the auto_healing_enabled label from cluster.")
+		log.Warningf("failed to get the auto_healing_enabled label from cluster.")
 		return false
 	}
 	if !autoHealingEnabled {
-		klog.V(0).Infoln("Auto healing on current cluster is disabled.")
+		log.Infof("auto healing on current cluster is disabled.")
 		return false
 	}
 
 	clusterStackName, err := provider.getStackName(cluster.StackID)
 	stack, err := stacks.Get(provider.Heat, clusterStackName, cluster.StackID).Extract()
 	if err != nil {
-		klog.Warningln("Failed to get stack %s", cluster.StackID)
+		log.Warningf("failed to get stack %s", cluster.StackID)
 	}
 	if statusesPreventingRepair.Has(stack.Status) {
-		klog.V(0).Infoln("Current stack is in status %s", stack.Status)
+		log.Infof("current stack is in status %s", stack.Status)
 		return false
 	}
 
