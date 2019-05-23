@@ -149,7 +149,7 @@ func (c *Controller) GetLeaderElectionLock() (resourcelock.Interface, error) {
 	id = id + "_" + string(uuid.NewUUID())
 
 	rl, err := resourcelock.New(
-		"endpoints",
+		"configmaps",
 		"kube-system",
 		"k8s-auto-healer",
 		c.leaderElectionClient.CoreV1(),

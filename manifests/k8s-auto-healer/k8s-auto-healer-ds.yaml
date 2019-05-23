@@ -1,0 +1,100 @@
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: k8s-auto-healer
+  namespace: kube-system
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: k8s-auto-healer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: k8s-auto-healer
+    namespace: kube-system
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: k8s-auto-healer-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    cluster-name: devstack-k8s
+    dry-run: true
+    monitor-interval: 10
+    leader-elect: true
+    healthcheck:
+      master:
+        - type: NodeCondition
+          params:
+            unhealthyDuration: 20s
+            types:
+              - Ready
+            okValues:
+              - "True"
+      worker:
+        - type: NodeCondition
+          params:
+            unhealthyDuration: 20s
+            types:
+              - Ready
+            errorValues:
+              - "Unknown"
+    openstack:
+      auth-url: https://api.nz-hlz-1.catalystcloud.io:5000/v3
+      user-id: ceb61464a3d341ebabdf97d1d4b97099
+      password: kong.123
+      project-id: b23a5e41d1af4c20974bf58b4dff8e5a
+      region: nz-hlz-1
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k8s-auto-healer
+  namespace: kube-system
+  labels:
+    k8s-app: k8s-auto-healer
+spec:
+  selector:
+    matchLabels:
+      k8s-app: k8s-auto-healer
+  template:
+    metadata:
+      labels:
+        k8s-app: k8s-auto-healer
+    spec:
+      serviceAccountName: k8s-auto-healer
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      containers:
+        - name: k8s-auto-healer
+          image: lingxiankong/k8s-auto-healer:0.1.0
+          imagePullPolicy: Always
+          args:
+            - /bin/k8s-auto-healer
+            - --config=/etc/k8s-auto-healer/config.yaml
+            - --v
+            - "4"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/k8s-auto-healer
+      volumes:
+        - name: config
+          configMap:
+            name: k8s-auto-healer-config

@@ -62,12 +62,12 @@ var rootCmd = &cobra.Command{
 			log.Fatalf("failed to get resource lock for leader election, error: %v", err)
 		}
 
-		// Try and become the leader and start cloud controller manager loops
+		// Try and become the leader and start autohealing loops
 		leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
 			Lock:          lock,
-			LeaseDuration: 15 * time.Second,
-			RenewDeadline: 10 * time.Second,
-			RetryPeriod:   3 * time.Second,
+			LeaseDuration: 20 * time.Second,
+			RenewDeadline: 15 * time.Second,
+			RetryPeriod:   5 * time.Second,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: autohealer.Start,
 				OnStoppedLeading: func() {
@@ -126,7 +126,7 @@ func initConfig() {
 		log.Fatalf("Failed to read config file, error: %s", err)
 	}
 
-	log.Info("Using config file")
+	log.Infof("Using config file %s", viper.ConfigFileUsed())
 
 	conf = config.NewConfig()
 	if err := viper.Unmarshal(&conf); err != nil {
