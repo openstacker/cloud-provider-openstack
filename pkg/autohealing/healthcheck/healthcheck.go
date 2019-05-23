@@ -20,8 +20,8 @@ import (
 	"reflect"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	apiv1 "k8s.io/api/core/v1"
+	log "k8s.io/klog"
 )
 
 var (
@@ -51,7 +51,7 @@ func registerHealthCheck(name string, register registerPlugin) {
 		log.Fatalf("Health check plugin %s is already registered.", name)
 	}
 
-	log.WithFields(log.Fields{"plugin": name}).Info("Registered health check plugin.")
+	log.Infof("Registered health check plugin %s", name)
 	checkPlugins[name] = register
 }
 

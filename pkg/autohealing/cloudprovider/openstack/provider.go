@@ -28,8 +28,9 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stackresources"
 	"github.com/gophercloud/gophercloud/openstack/orchestration/v1/stacks"
 	uuid "github.com/pborman/uuid"
-	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
+	log "k8s.io/klog"
+
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
 )
@@ -75,7 +76,7 @@ func (provider *OpenStackCloudProvider) getStackName(stackID string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("could not find stack with ID %s: %v", stackID, err)
 	}
-	log.Debugf("for stack ID %s, stack name is %s", stackID, stack.Name)
+	log.V(4).Infof("For stack ID %s, stack name is %s", stackID, stack.Name)
 	return stack.Name, nil
 }
 
@@ -112,7 +113,7 @@ func (provider *OpenStackCloudProvider) getAllStackResourceMapping(stackName, st
 					StackID:      paths[len(paths)-1],
 					StackName:    paths[len(paths)-2],
 				}
-				log.Infof("resource ID: %s, resource name: %s, parent stack ID: %s, parent stack name: %s", sr.PhysicalID, sr.Name, paths[len(paths)-1], paths[len(paths)-2])
+				log.V(4).Infof("resource ID: %s, resource name: %s, parent stack ID: %s, parent stack name: %s", sr.PhysicalID, sr.Name, paths[len(paths)-1], paths[len(paths)-2])
 				mapping[sr.PhysicalID] = m
 			}
 		}
@@ -160,10 +161,9 @@ func (provider OpenStackCloudProvider) Repair(nodes []healthcheck.NodeInfo) erro
 			log.Errorf("failed to mark resource %s unhealthy", serverID)
 		}
 	}
-	log.Debugf("start to do Heat stack update to rebuild resources.")
+	log.V(4).Info("start to do Heat stack update to rebuild resources.")
 	err = stacks.UpdatePatch(provider.Heat, clusterStackName, cluster.StackID, stacks.UpdateOpts{}).ExtractErr()
 	if err != nil {
-		log.Errorf(err.Error())
 		return fmt.Errorf("could not update stack to rebuild resources: %v", err)
 	}
 	return nil

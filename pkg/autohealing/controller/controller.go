@@ -18,12 +18,10 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -35,7 +33,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
+	log "k8s.io/klog"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/cloudprovider"
 	_ "k8s.io/cloud-provider-openstack/pkg/autohealing/cloudprovider/register"
@@ -91,7 +89,7 @@ func createKubeClients(apiserverHost string, kubeConfig string) (*kubernetes.Cli
 	cfg.Burst = defaultBurst
 	cfg.ContentType = "application/vnd.kubernetes.protobuf"
 
-	log.Debug("creating kubernetes API clients")
+	log.V(4).Info("creating kubernetes API clients")
 
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
@@ -101,14 +99,7 @@ func createKubeClients(apiserverHost string, kubeConfig string) (*kubernetes.Cli
 	if err != nil {
 		return nil, nil, err
 	}
-
-	v, err := client.Discovery().ServerVersion()
-	if err != nil {
-		return nil, nil, err
-	}
-	log.WithFields(log.Fields{
-		"version": fmt.Sprintf("v%v.%v", v.Major, v.Minor),
-	}).Debug("kubernetes API client created")
+	log.V(4).Info("Kubernetes API client created.")
 
 	return client, leaderElectionClient, nil
 }
@@ -126,16 +117,12 @@ func NewController(conf config.Config) *Controller {
 	// initialize k8s clients
 	kubeClient, leaderElectionClient, err := createKubeClients(conf.Kubernetes.ApiserverHost, conf.Kubernetes.KubeConfig)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"api_server":  conf.Kubernetes.ApiserverHost,
-			"kuberconfig": conf.Kubernetes.KubeConfig,
-			"error":       err,
-		}).Fatal("failed to initialize kubernetes client")
+		log.Fatalf("failed to initialize kubernetes client, error: %v", err)
 	}
 
 	// event
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(klog.Infof)
+	eventBroadcaster.StartLogging(log.V(4).Infof)
 	eventBroadcaster.StartRecordingToSink(&typev1.EventSinkImpl{
 		Interface: kubeClient.CoreV1().Events(""),
 	})
@@ -179,10 +166,10 @@ func (c *Controller) GetLeaderElectionLock() (resourcelock.Interface, error) {
 }
 
 func (c *Controller) startMasterMonitor(wg *sync.WaitGroup) {
-	log.Debug("Starting to check master nodes.")
+	log.V(4).Info("Starting to check master nodes.")
 	defer wg.Done()
 
-	log.Debug("Finished checking master nodes.")
+	log.V(4).Info("Finished checking master nodes.")
 }
 
 // getUnhealthyWorkerNodes returns the nodes that need to be repaired.
@@ -198,7 +185,7 @@ func (c *Controller) getUnhealthyWorkerNodes() ([]healthcheck.NodeInfo, error) {
 			continue
 		}
 		if !checker.IsWorkerSupported() {
-			log.Warnf("Plugin type %s does not support worker node health check.", item.Type)
+			log.Warningf("Plugin type %s does not support worker node health check.", item.Type)
 			continue
 		}
 
@@ -232,13 +219,13 @@ func (c *Controller) getUnhealthyWorkerNodes() ([]healthcheck.NodeInfo, error) {
 }
 
 func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
-	log.Debug("Starting to check worker nodes.")
+	log.V(4).Info("Starting to check worker nodes.")
 	defer wg.Done()
 
 	// Get all the unhealthy worker nodes.
 	unhealthyNodes, err := c.getUnhealthyWorkerNodes()
 	if err != nil {
-		log.WithFields(log.Fields{"error": err}).Error("Failed to get unhealthy worker nodes.")
+		log.Errorf("Failed to get unhealthy worker nodes, error: %v", err)
 		return
 	}
 
@@ -251,9 +238,9 @@ func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
 	if len(unhealthyNodes) > 0 {
 		if !c.provider.Enabled() {
 			// The cloud provider doesn't allow to trigger node repair.
-			log.WithFields(log.Fields{"nodes": unhealthyNodeNames.List()}).Info("Auto healing is ignored.")
+			log.Infof("Auto healing is ignored for nodes %s", unhealthyNodeNames.List())
 		} else {
-			log.WithFields(log.Fields{"nodes": unhealthyNodeNames.List()}).Info("Starting to repair worker nodes.")
+			log.Infof("Starting to repair worker nodes %s", unhealthyNodeNames.List())
 
 			if !c.config.DryRun {
 				// Cordon the nodes before repair.
@@ -261,7 +248,7 @@ func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
 					newNode := node.KubeNode.DeepCopy()
 					newNode.Spec.Unschedulable = true
 					if _, err = c.kubeClient.CoreV1().Nodes().Update(newNode); err != nil {
-						log.WithFields(log.Fields{"error": err}).Errorf("Failed to cordon worker node %s", node.KubeNode.Name)
+						log.Errorf("Failed to cordon worker node %s", node.KubeNode.Name)
 					} else {
 						log.Infof("Worker node %s is cordoned", node.KubeNode.Name)
 					}
@@ -272,7 +259,7 @@ func (c *Controller) startWorkerMonitor(wg *sync.WaitGroup) {
 		}
 	}
 
-	log.Debug("Finished checking worker nodes.")
+	log.V(4).Info("Finished checking worker nodes.")
 }
 
 // Start starts the autohealing controller.

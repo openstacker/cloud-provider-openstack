@@ -18,18 +18,19 @@ package cmd
 
 import (
 	"context"
+	goflag "flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/mitchellh/go-homedir"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"k8s.io/client-go/tools/leaderelection"
-
-	"time"
+	log "k8s.io/klog"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/controller"
@@ -37,7 +38,6 @@ import (
 
 var (
 	cfgFile string
-	isDebug bool
 	conf    config.Config
 )
 
@@ -93,12 +93,12 @@ func Execute() {
 }
 
 func init() {
-	log.SetOutput(os.Stdout)
-
 	cobra.OnInitialize(initConfig)
-
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.kube_autohealer_config.yaml)")
-	rootCmd.PersistentFlags().BoolVar(&isDebug, "debug", false, "Print more detailed information.")
+
+	log.InitFlags(nil)
+	goflag.CommandLine.Parse(nil)
+	flag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -123,20 +123,16 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err != nil {
-		log.WithFields(log.Fields{"error": err}).Fatal("Failed to read config file")
+		log.Fatalf("Failed to read config file, error: %s", err)
 	}
 
-	log.WithFields(log.Fields{"file": viper.ConfigFileUsed()}).Info("Using config file")
+	log.Info("Using config file")
 
 	conf = config.NewConfig()
 	if err := viper.Unmarshal(&conf); err != nil {
-		log.WithFields(log.Fields{"error": err}).Fatal("Unable to decode the configuration")
+		log.Fatalf("Unable to decode the configuration, error: %v", err)
 	}
 	if conf.ClusterName == "" {
 		log.Fatal("cluster-name is required in the configuration.")
-	}
-
-	if isDebug {
-		log.SetLevel(log.DebugLevel)
 	}
 }

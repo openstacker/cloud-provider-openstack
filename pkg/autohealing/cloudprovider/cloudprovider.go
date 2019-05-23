@@ -17,7 +17,7 @@ limitations under the License.
 package cloudprovider
 
 import (
-	log "github.com/sirupsen/logrus"
+	log "k8s.io/klog"
 
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/config"
 	"k8s.io/cloud-provider-openstack/pkg/autohealing/healthcheck"
@@ -52,7 +52,7 @@ func RegisterCloudProvider(name string, register RegisterFunc) {
 		log.Fatalf("Cloud provider %s is already registered.", name)
 	}
 
-	log.WithFields(log.Fields{"provider": name}).Info("Registered cloud provider.")
+	log.Infof("Registered cloud provider %s.", name)
 	providers[name] = register
 }
 
