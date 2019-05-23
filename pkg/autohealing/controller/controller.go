@@ -209,6 +209,9 @@ func (c *Controller) getUnhealthyWorkerNodes() ([]healthcheck.NodeInfo, error) {
 		if len(node.Status.Conditions) == 0 {
 			continue
 		}
+		if time.Now().Before(node.ObjectMeta.GetCreationTimestamp().Add(c.config.RepairDelayAfterAdd)) {
+			continue
+		}
 		nodes = append(nodes, healthcheck.NodeInfo{KubeNode: node})
 	}
 

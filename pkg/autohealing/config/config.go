@@ -17,6 +17,8 @@ limitations under the License.
 package config
 
 import (
+	"time"
+
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/identity/v3/tokens"
 )
@@ -52,6 +54,9 @@ type Config struct {
 
 	// (Optional) Start a leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability. Default: true
 	LeaderElect bool `mapstructure:"leader-elect"`
+
+	// (Optional) How long after new node added that the node will be checked for health status
+	RepairDelayAfterAdd time.Duration `mapstructure:"repair-delay-after-add"`
 }
 
 type healthCheck struct {
@@ -118,6 +123,7 @@ func (cfg Config) ToV3AuthOptions() tokens.AuthOptions {
 
 // NewConfig defines the default values for Config
 func NewConfig() Config {
+	delayAfterAdd, _ := time.ParseDuration("20m")
 	return Config{
 		DryRun:               false,
 		CloudProvider:        "openstack",
@@ -125,5 +131,6 @@ func NewConfig() Config {
 		MasterMonitorEnabled: true,
 		WorkerMonitorEnabled: true,
 		LeaderElect:          true,
+		RepairDelayAfterAdd:  delayAfterAdd,
 	}
 }
